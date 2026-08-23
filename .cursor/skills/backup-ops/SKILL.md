@@ -6,10 +6,10 @@ description: >-
   `start` probes the machine, asks which folders/app configs/browser profiles/history
   to back up with typical picks pre-selected, confirms the destination drive, then
   backs up, verifies and self-heals problems during backup AND restore. One command
-  to start the backup process; a restore command migrates onto a new OS (e.g. Omarchy
-  4.0) with browser-profile remapping. Use whenever the user wants to back up, migrate,
-  restore, verify, list the backup scope, fix/heal an error, rehearse, or regenerate
-  the backup catalog.
+  to start the backup process; a restore command migrates onto any new OS (Linux,
+  Windows, macOS, WSL) with browser-profile remapping. Use whenever the user wants to
+  back up, migrate, restore, verify, list the backup scope, fix/heal an error,
+  rehearse, or regenerate the backup catalog.
 arguments: mode
 user_invocable: true
 user-invocable: true
@@ -39,7 +39,7 @@ Codex prompt examples that map to the same router semantics:
 
 ```text
 Run the backup-ops start mode for a backup.
-Run the backup-ops start mode but it's a restore onto Omarchy.
+Run the backup-ops start mode for a restore onto this new OS.
 Run the backup-ops backup mode with the full preset.
 Run the backup-ops verify mode and report per-section results.
 Run the backup-ops heal mode for the browser_profiles failure.
@@ -87,8 +87,8 @@ Available commands:
   /backup-ops onboard   → First-run setup: build config/user.yml
   /backup-ops status    → Last run + open issues summary
 
-Platforms: linux · windows · macos · wsl (detected automatically).  Target example:
-Pop!_OS → Omarchy 4.0. Catalog fully in config/manifest.yml.
+Platforms: linux · windows · macos · wsl (detected automatically).  Any direction:
+Linux ↔ Windows ↔ macOS. Catalog fully in config/manifest.yml.
 ```
 
 ---

@@ -8,8 +8,8 @@ macOS, WSL).
 
 This guide walks through the two real journeys people use it for:
 
-1. **The backup** — before leaving the current OS (e.g. Pop!_OS).
-2. **The restore** — on the new OS (e.g. Omarchy 4.0).
+1. **The backup** — on your current OS (any Linux distro, Windows, macOS, WSL).
+2. **The restore** — on your new OS (any other one; the catalog remaps paths).
 
 Both follow the same rhythm: *probe the machine → answer a few questions (typical
 picks already pre-selected) → confirm → run → verify*. If anything breaks mid-way,
@@ -36,10 +36,10 @@ Backup-Ops needs `rsync` and `sqlite3` (sqlite keeps browser history safe during
 copy):
 
 ```bash
-# Pop!_OS / Ubuntu / Debian
+# Debian / Ubuntu / Pop!_OS
 sudo apt install -y rsync sqlite3
 
-# Arch / Omarchy
+# Arch and derivatives (Omarchy, CachyOS, …)
 sudo pacman -S --needed rsync sqlite3
 
 # Fedora
@@ -47,6 +47,9 @@ sudo dnf install -y rsync sqlite
 
 # macOS (rsync is usually preinstalled)
 brew install sqlite3
+
+# Windows — run inside Git-Bash or WSL; install rsync + sqlite3 there
+# (e.g. `pacman -S rsync sqlite` in MSYS2/Git-Bash, or use WSL)
 ```
 
 ### Step 1 — Download the project
@@ -100,8 +103,8 @@ A short set of questions. **The typical answers are already pre-selected** — y
 just confirm:
 
 1. **Where should the backup live?** — it lists the external drives it found; pick the
-   mount path (e.g. `/media/yamillanz/BACKUP/home-backup`). Plug in the USB/NVMe drive
-   first.
+   mount path (e.g. `/media/<you>/BACKUP/home-backup` on Linux, `D:/home-backup` on
+   Windows, `/Volumes/BACKUP/home-backup` on macOS). Plug in the USB/NVMe drive first.
 2. **What should be backed up?** — folders, configs, dotfiles, secrets, browsers,
    system state are pre-selected. Tweak if you want ("skip Downloads", "add Games",
    or "keep all").
@@ -128,7 +131,7 @@ bash scripts/backup.sh
 Verification is not optional. The agent runs:
 
 ```bash
-bash scripts/verify.sh --tree /media/yamillanz/BACKUP/home-backup
+bash scripts/verify.sh --tree /media/<you>/BACKUP/home-backup
 ```
 
 and reports each section: folders, browser sqlite integrity, tar checksums, secrets.
@@ -152,28 +155,29 @@ bash scripts/verify.sh --tree <destination>      # prove it
 
 # PART 2 — The restore (on the new OS)
 
-This is where you move onto the fresh system. The catalog already knows the target
-paths, so a backup made on Pop!_OS (or Windows, or macOS) restores onto Omarchy 4.0
-correctly — browsers included.
+This is where you move onto the fresh system. The catalog already knows every
+platform's paths, so a backup made on one OS (Linux, Windows, macOS, WSL) restores
+correctly onto any other — browsers included.
 
 ### Step 1 — Install the new OS
 
-Install Omarchy 4.0 (or any Linux). Do **not** copy your files yet. The backup tool
-restores your *home directory and user config* — the OS itself you install fresh.
+Install whatever you're moving to — a Linux distro (Omarchy, Ubuntu, Fedora…),
+Windows, or macOS. Do **not** copy your files yet. The backup tool restores your
+*home directory and user config* — the OS itself you install fresh.
 
 ### Step 2 — Reinstall your apps first
 
-Your app *data* will be restored, but app *binaries* are not (that's the distro's
-job). The backup captured a checklist — `system-state/snapshot.txt` — including the
-flatpak list. Flatpaks are portable, so the IDs carry straight over:
+Your app *data* will be restored, but app *binaries* are not (that's the OS's job).
+The backup captured a checklist — `system-state/snapshot.txt` — including your
+package/flatpak list. Example on Linux (flatpak IDs are portable across distros):
 
 ```bash
-flatpak install flathub com.brave.Browser com.google.Chrome com.microsoft.Edge \
-  com.opera.Opera com.vivaldi.Vivaldi app.zen_browser.zen io.gitlab.librewolf-community
+flatpak install flathub com.brave.Browser com.google.Chrome app.zen_browser.zen
 # ... and the rest from snapshot.txt
 ```
 
-(Full checklist: `docs/migration-checklist.md`.)
+On Windows you'd reinstall via `winget`, on macOS via `brew` — same idea: apps
+first, then restore their data on top. (Full checklist: `docs/migration-checklist.md`.)
 
 ### Step 3 — Download the project on the new OS
 
@@ -182,7 +186,7 @@ Same as before — the new machine needs the same `backup-ops/` folder:
 ```bash
 git clone https://github.com/<you>/backup-ops.git
 cd backup-ops
-sudo pacman -S --needed rsync sqlite3        # Omarchy / Arch
+# install rsync + sqlite3 — same command as in Part 1, for YOUR new OS
 ```
 
 ### Step 4 — Open your agent tool
@@ -203,7 +207,7 @@ or say:
 or in Codex:
 
 ```text
-Run the backup-ops start mode but it's a restore onto Omarchy.
+Run the backup-ops start mode for a restore onto this new OS.
 ```
 
 ### Step 6 — Answer the questions
@@ -219,8 +223,8 @@ Same rhythm, reversed:
 The agent dry-runs, confirms, restores, and verifies:
 
 ```bash
-bash scripts/restore.sh --from /media/yamillanz/BACKUP/home-backup --dry-run
-bash scripts/restore.sh --from /media/yamillanz/BACKUP/home-backup
+bash scripts/restore.sh --from /media/<you>/BACKUP/home-backup --dry-run
+bash scripts/restore.sh --from /media/<you>/BACKUP/home-backup
 bash scripts/verify.sh --tree ~ --restored
 ```
 
@@ -253,7 +257,7 @@ language:
   output: en            # human output language
 preset: essentials      # essentials | full | minimal
 selection: []           # precise list overrides preset: ["documents","projects","secrets"]
-destination: "/media/yamillanz/BACKUP/home-backup"
+destination: "/media/<you>/BACKUP/home-backup"
 auto_confirm: false
 ```
 

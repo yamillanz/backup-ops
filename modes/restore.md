@@ -1,16 +1,18 @@
 # restore mode
 
-Goal: place a backed-up home back onto a (fresh) system — this is the **Omarchy 4.0
-(Arch)** migration case, or any Windows/macOS→Linux move. The catalog maps every
-source dest back through the CURRENT platform's roots, so a Windows backup restores
-onto Linux automatically (browsers included). Verify after. SELF-HEAL at full strength.
+Goal: place a backed-up home back onto a (fresh) system — **any OS → any OS**
+(distro→distro, Windows/macOS→Linux, or any other pair). The catalog maps every
+source dest back through the CURRENT platform's roots, so a backup made on one OS
+restores onto another automatically (browsers included). Verify after. SELF-HEAL at
+full strength.
 
 ## Preflight
 
 1. Load catalog `config/manifest.yml` + `config/user.yml` + `data/state.yml`.
 2. Locate `--from` (backup root). If unavailable/incomplete → `verify` first.
-3. Detect new OS (informational): `cat /etc/os-release`; `which pacman yay apt dnf`
-   (Omarchy → pacman/yay). Used only for the reinstall checklist note.
+3. Detect new OS (informational): `cat /etc/os-release`; `which pacman yay apt dnf
+   brew winget` (pacman/yay on Arch-likes, apt on Debian-likes, …). Used only for
+   the reinstall checklist note.
 4. Default `--to` = `$HOME`; `--dry-run` first unless disabled. Home-only writes.
 
 ## Sequence (engine-driven)
@@ -35,10 +37,10 @@ Fail → `heal` → escalate. Do NOT mark done on browser failures without optio
 ## Cross-OS notes
 
 - Flatpak browser apps (Brave/Chrome/Edge/Opera/Vivaldi/Zen/LibreWolf) restore into
-  the same paths on Linux; reinstall matching flatpaks on Omarchy first.
+  the same paths on any Linux; reinstall the matching flatpaks there first.
 - System state (`snapshot.txt`) = reinstall checklist — see `docs/migration-checklist.md`.
-- GNOME (Pop) vs COSMIC (Omarchy) settings: restored `~/.config/cosmic` applies;
-  GNOME-specific config is inert until that DE is installed.
+- Desktop-environment settings (GNOME, KDE, COSMIC…) travel under `~/.config`:
+  config for a DE that isn't installed on the new OS is simply inert until it is.
 
 ## Record
 

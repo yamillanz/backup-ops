@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# backup-ops: btrfs snapshot helper (for Omarchy, which defaults to btrfs).
-# Lets the user roll back the whole OS if a migration goes sideways.
+# backup-ops: btrfs snapshot helper (for distros whose root filesystem is btrfs,
+# e.g. Omarchy). Lets the user roll back the whole OS if a migration goes sideways.
 # Usage:
 #   btrfs.sh status                 # list snapshots on the current system
 #   btrfs.sh snapshot <name>        # create a read-only snapshot (may need sudo)
@@ -42,7 +42,7 @@ case "$ACTION" in
     echo "  sudo btrfs subvolume snapshot /mnt/@$NAME /mnt/@"
     echo "  sudo umount /mnt && reboot"
     echo
-    echo "# Or via the bootloader snapshot picker if Omarchy exposes one."
+    echo "# Or via the bootloader snapshot picker if your distro exposes one."
     ;;
 
   *)
