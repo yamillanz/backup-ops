@@ -123,6 +123,7 @@ if [[ $RESTORED -eq 1 ]]; then
   if [[ -d "$TREE/.ssh" ]]; then
     for key in "$TREE"/.ssh/id_*; do
       [[ -f "$key" ]] || continue
+      [[ "$key" == *.pub ]] && continue   # public keys are 644 by design
       mode=$(stat -c %a "$key" 2>/dev/null)
       [[ "$mode" == "600" ]] || { secret_perm_ok=1; FAILED_LINES+=("ssh key perms $mode: $key"); echo "  ❌ ssh perms: $key ($mode)"; }
     done
