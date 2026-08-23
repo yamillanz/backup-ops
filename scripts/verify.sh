@@ -55,7 +55,12 @@ if [[ $RESTORED -eq 0 ]]; then
     kind="$(printf '%s' "$line" | cut -f2)"
     root="$(printf '%s' "$line" | cut -f4)"
     destrel="$(printf '%s' "$line" | cut -f5)"
-    [[ -n "$root" ]] || continue
+    [[ -n "$root" || "$kind" == "snapshot" ]] || continue
+    if [[ "$kind" == "snapshot" ]]; then
+      # generated content: no source root to check — require the dest output
+      dir_nonempty "$id" "$TREE/$destrel"
+      continue
+    fi
     r="$(expand_home "$root")"
     if [[ ! -e "$r" ]]; then
       echo "  ℹ skipped-missing source: $id ($r not on this machine)"
@@ -71,14 +76,11 @@ if [[ $RESTORED -eq 0 ]]; then
       drain)
         # browsers populated only when at least one browser exists on the machine
         any=0
-        while read -r n br; do
+        while IFS=$'\t' read -r n br _bex; do
           br="$(expand_home "$br")"
           [[ -d "$br" ]] && any=1
         done < <(browser_rows "$plat")
         if [[ $any -eq 1 ]]; then dir_nonempty "browsers" "$TREE/$destrel"; else echo "  ℹ no browsers on this machine — browsers section skipped (expected)"; fi
-        ;;
-      snapshot)
-        dir_nonempty "system-state" "$TREE/$destrel"
         ;;
     esac
   done < <(active_rows "$plat")

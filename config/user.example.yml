@@ -15,3 +15,6 @@ destination: ""
 
 # Overrides platform autodetection if you need to force it (rare).
 platform: auto       # auto | linux | windows | macos | wsl
+
+# Headless mode: the wizard asks once, summarizes, and runs without re-asking.
+auto_confirm: false

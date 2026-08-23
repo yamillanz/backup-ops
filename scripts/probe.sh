@@ -30,16 +30,18 @@ case "$plat" in
 esac
 
 # --- available user folders (typical picks pre-selected) ----------------------
+# Catalog-driven: every `dir` source root that exists on THIS platform shows up
+# here — add a folder to the catalog and the probe sees it automatically.
 echo "[folders]"
-for f in Documents Projects Desktop Pictures Videos Music Public Downloads Games; do
-  for cand in "$home/$f" "$home/Imágenes"; do
-    if [[ -d "$cand" ]]; then echo "folder|$cand"; break; fi
-  done
-done
+while IFS=$'\t' read -r _id kind _enabled root _dest _label _extra; do
+  [[ "$kind" == "dir" && -n "$root" ]] || continue
+  r="$(expand_home "$root")"
+  [[ -d "$r" ]] && echo "folder|$r"
+done < <(render_catalog "$plat")
 
 # --- browsers present ---------------------------------------------------------
 echo "[browsers]"
-browser_rows "$plat" | while read -r name root; do
+browser_rows "$plat" | while IFS=$'\t' read -r name root _bex; do
   r="$(expand_home "$root")"
   if [[ -d "$r" ]]; then echo "browser|$name|present|$r"; else echo "browser|$name|absent|$r"; fi
 done

@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --include) INCLUDE="$2"; shift 2 ;;
     --exclude) EXCLUDE_LIST="$2"; shift 2 ;;
     --ask) ASK=1; shift ;;
+    --auto-yes) ASK=0; shift ;;   # explicit non-interactive (scripts never prompt unless --ask)
     --root) ROOT="$2"; shift 2 ;;
     --no-mount-check) NO_MOUNT_CHECK=1; shift ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
@@ -42,14 +43,14 @@ DEST="$ROOT"
 [[ -z "$DEST" ]] && { echo "ERROR: no destination (set in config/user.yml `destination:` or --root)" >&2; exit 3; }
 DEST="$(expand_home "$DEST")"
 
-# --- selection ---------------------------------------------------------------
+# --- selection (always normalized to ONE id per line before filtering) --------
 if [[ -n "$INCLUDE" ]]; then
   # --include defines the run entirely (restrictive)
-  IDS="$(printf '%s' "$INCLUDE" | tr ',' ' ')"
-  [[ -n "$PRESET" ]] && IDS="$IDS $(preset_ids "$PRESET" | tr '\n' ' ')"
+  IDS="$(printf '%s' "$INCLUDE" | tr ',' '\n')"
+  [[ -n "$PRESET" ]] && IDS="$IDS"$'\n'"$(preset_ids "$PRESET")"
 elif [[ -n "$PRESET" ]]; then
   # temporary override: honor preset for this run only
-  IDS="$(preset_ids "$PRESET" | tr '\n' ' ')"
+  IDS="$(preset_ids "$PRESET")"
 else
   IDS="$(active_source_ids)"
 fi
@@ -59,7 +60,7 @@ if [[ -n "$EXCLUDE_LIST" ]]; then
   done
 fi
 
-IDS="$(printf '%s\n' "$IDS" | sed '/^[[:space:]]*$/d' | sort -u | tr '\n' ' ')"
+IDS="$(printf '%s\n' "$IDS" | tr ' ' '\n' | sed '/^[[:space:]]*$/d' | sort -u | tr '\n' ' ')"
 [[ -n "$IDS" ]] || { echo "nothing selected (empty active selection)"; exit 0; }
 echo "platform=$plat home=$home"
 echo "selection: ${IDS}"
@@ -74,23 +75,32 @@ if [[ $DRY_RUN -eq 0 && $NO_MOUNT_CHECK -eq 0 ]]; then
     exit 3
   fi
   free_gb="$(df -P "$DEST" 2>/dev/null | tail -1 | awk '{print $4}')"
-  min_gb="${FREE_MIN_GB:-30}"
+  # precedence: env override > catalog safety knob > 30GB fallback
+  min_gb="${FREE_MIN_GB:-$(safety_get free_space_min_gb)}"
+  [[ -n "$min_gb" ]] || min_gb=30
   if [[ -n "$free_gb" && "$free_gb" -lt $((min_gb * 1024 * 1024)) ]]; then
     echo "WARN: only ~$((free_gb / 1024 / 1024))GB free on '$DEST' (min ${min_gb}GB). Continuing anyway; you can abort with Ctrl-C." >&2
   fi
   echo "destination: $DEST"
-else
+elif [[ $DRY_RUN -eq 1 ]]; then
   echo "DRY-RUN destination: $DEST"
+else
+  echo "destination: $DEST (mount check skipped by --no-mount-check)"
 fi
 
 # --- helpers ------------------------------------------------------------------
 expand_src() { expand_home "$1"; }
 
 rsync_mirror() {
-  # rsync_mirror <label> <src> <destrel>
-  local label="$1" src="$2" rel="$3"
+  # rsync_mirror <label> <src> <destrel> [extra-excludes pipe-separated]
+  local label="$1" src="$2" rel="$3" bex="${4:-}"
   local -a ex=()
   load_excludes ex
+  if [[ -n "$bex" ]]; then
+    local -a bx=()
+    IFS='|' read -ra bx <<< "$bex"
+    local b; for b in "${bx[@]}"; do [[ -n "$b" ]] && ex+=(--exclude="$b"); done
+  fi
   local dst="$DEST/$rel"
   [[ $DRY_RUN -eq 0 ]] && mkdir -p "$(dirname "$dst")"
   log "dir  : $label -> $dst"
@@ -119,14 +129,14 @@ sqlite_drain() {
 }
 
 drain_mirror() {
-  local name="$1" src="$2" rel="$3"
+  local name="$1" src="$2" rel="$3" bex="${4:-}"
   [[ -d "$src" ]] || { log "skip : $name missing ($src)"; return 0; }
   local staging="$DEST/.drain/$name"
   [[ $DRY_RUN -eq 0 ]] && mkdir -p "$staging"
   local db
   while IFS= read -r db; do sqlite_drain "$db" "$staging" || return 1; done < <(
     find "$src" \( -name "*.sqlite" -o -name "places.sqlite" -o -name "History" -o -name "Cookies" -o -name "*history*.sqlite" \) ! -path '*/Cache/*' 2>/dev/null)
-  rsync_mirror "$name" "$src" "$rel"
+  rsync_mirror "$name" "$src" "$rel" "$bex"
 }
 
 # tar a source honoring include_only/exclude lists from catalog `extra`.
@@ -185,55 +195,60 @@ run_source() {
     dir) rsync_mirror "$id" "$src" "$destrel" ;;
     drain) drain_mirror "$id" "$src" "$destrel" ;;
     tar) tar_blob "$id" "$src" "$destrel" "$extra" ;;
-    snapshot) : ;; # handled separately below
   esac
 }
 
 # --- browsers source (drain) --------------------------------------------------
 run_browsers() {
   local destrel="$1"
-  local name root
-  browser_rows "$plat" | while read -r name root; do
+  local name root bex
+  browser_rows "$plat" | while IFS=$'\t' read -r name root bex; do
     local r
     r="$(expand_home "$root")"
     [[ -d "$r" ]] || { log "skip browser: $name missing ($r)"; continue; }
-    drain_mirror "$name" "$r" "$destrel/$name"
+    drain_mirror "$name" "$r" "$destrel/$name" "$bex"
   done
 }
 
-# --- snapshot source ----------------------------------------------------------
+# --- snapshot sources (system state) ------------------------------------------
+# Dispatched like any other source: runs ONLY when the source id is in the
+# active selection. Destination comes from the catalog `dest:` field.
 run_snapshot() {
-  local destrel="$1"
-  if [[ $DRY_RUN -eq 1 ]]; then echo "DRY: snapshot -> $DEST/$destrel/snapshot.txt"; return 0; fi
+  local id="$1" destrel="$2" root="$3"
+  if [[ $DRY_RUN -eq 1 ]]; then echo "DRY: snapshot $id -> $DEST/$destrel"; return 0; fi
   mkdir -p "$DEST/$destrel"
-  log "snap : system-state"
-  {
-    echo "## system-state snapshot ($(date -Is))"
-    echo "platform=$plat"
-    echo "os_release=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')"
-    echo "--- dpkg/apt packages (first 300) ---"
-    dpkg-query -W -f='${binary:Package}\t${Version}\n' 2>/dev/null | head -300
-    echo "--- flatpak apps ---"
-    flatpak list --app --columns=application 2>/dev/null || true
-    echo "--- fstab ---"
-    cat /etc/fstab 2>/dev/null
-    echo "--- systemd user units ---"
-    systemctl --user list-unit-files --no-pager 2>/dev/null | head -40
-    echo "--- toolchain dirs (info) ---"
-    du -sh "$home"/.nvm "$home"/.rustup "$home"/.cargo "$home"/.sdkman "$home"/go "$home"/.bun "$home"/.npm 2>/dev/null || true
-  } > "$DEST/$destrel/snapshot.txt" 2>/dev/null
+  log "snap : $id"
+  case "$id" in
+    toolchains)
+      # toolchain dirs are DATA: the catalog root holds them `>`-separated.
+      {
+        echo "## toolchain dirs ($(date -Is)) — informational, re-installed not restored"
+        printf '%s' "$root" | tr '>' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | while IFS= read -r d; do
+          [[ -n "$d" ]] && du -sh "$(expand_home "$d")" 2>/dev/null || true
+        done
+      } > "$DEST/$destrel/toolchains.txt" 2>/dev/null
+      ;;
+    *)
+      {
+        echo "## system-state snapshot ($(date -Is))"
+        echo "platform=$plat"
+        echo "os_release=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')"
+        echo "--- dpkg/apt packages (first 300) ---"
+        dpkg-query -W -f='${binary:Package}\t${Version}\n' 2>/dev/null | head -300
+        echo "--- flatpak apps ---"
+        flatpak list --app --columns=application 2>/dev/null || true
+        echo "--- fstab ---"
+        cat /etc/fstab 2>/dev/null
+        echo "--- systemd user units ---"
+        systemctl --user list-unit-files --no-pager 2>/dev/null | head -40
+      } > "$DEST/$destrel/snapshot.txt" 2>/dev/null
+      ;;
+  esac
 }
 
 # ===========================================================================
-log "backup start (platform=$plat, presets/${IDS})"
+log "backup start (platform=$plat, selection: $IDS)"
 
-# snapshot source (system state) uses its own transporter
-SNAP_DEST="system-state"
-# toolchains source is informational; fold into snapshot
-run_snapshot "$SNAP_DEST"
-
-# browsers handled via browser_rows (not the source root)
-BROWSER_DEST=""
 for id in $IDS; do
   line="$(render_catalog "$plat" | grep -P "^$id\t" | head -1 || true)"
   [[ -z "$line" ]] && continue
@@ -244,6 +259,10 @@ for id in $IDS; do
   extra="$(printf '%s' "$line" | cut -f7)"
   if [[ "$id" == "browsers" ]]; then
     run_browsers "$destrel"
+    continue
+  fi
+  if [[ "$kind" == "snapshot" ]]; then
+    run_snapshot "$id" "$destrel" "$root"
     continue
   fi
   run_source "$id" "$kind" "$root" "$destrel" "$label" "$extra"

@@ -146,23 +146,50 @@ preset_ids() {
 
 # ---------------------------------------------------------------------------
 # browser_rows [platform]: per-browser root lines:
-#   <name><TAB><root>   (root empty if N/A on this OS)
+#   <name><TAB><root><TAB><exclude|list>   (root empty if N/A on this OS)
+# The 3rd field carries the per-browser `exclude: [...]` rules from the catalog
+# (pipe-separated) so callers can forward them to rsync — data, not code.
 browser_rows() {
   local plat="${1:-$(detect_platform)}"
-  awk -v plat="$plat" '
+  awk -v plat="$plat" 'BEGIN { OFS="\t" }
     /^[[:space:]]{4}browsers:/ { in_browsers=1; next }
     in_browsers && /^[[:space:]]{6}[a-z_]+:$/ {
-      if (cur) print cur, cur_root
-      cur=$1; sub(/:/,"",cur); cur_root=""; next
+      if (cur) print cur, cur_root, cur_ex
+      cur=$1; sub(/:/,"",cur); cur_root=""; cur_ex=""; next
+    }
+    in_browsers && /^[[:space:]]{8}exclude:/ {
+      line=$0
+      sub(/^[[:space:]]*exclude:[[:space:]]*\[/, "", line); sub(/\][[:space:]]*$/, "", line)
+      gsub(/["'"'"']/, "", line); gsub(/,[[:space:]]*/, "|", line)
+      cur_ex=line; next
     }
     in_browsers && /^[[:space:]]{8}[a-z_]+:/ {
       k=substr($0,9); sub(/:.*/,"",k)
-      v=substr($0,10+length(k)); gsub(/["'"'"']/,"",v)
+      v=substr($0,10+length(k)); sub(/^[[:space:]]+/,"",v); gsub(/["'"'"']/,"",v)
       if (k==plat && v!="") cur_root=v
       next
     }
     in_browsers && /^[[:space:]]{4}[a-z_]+:/ && $0 !~ /^[[:space:]]{6,}/ { in_browsers=0 }
-    END { if (cur) print cur, cur_root }
+    END { if (cur) print cur, cur_root, cur_ex }
+  ' "$BB_CATALOG"
+}
+
+# ---------------------------------------------------------------------------
+# safety_get <key>: read a knob from the catalog's top-level `safety:` block
+# (e.g. `safety_get free_space_min_gb`). Empty when absent.
+safety_get() {
+  local key="$1"
+  awk -v key="$key" '
+    /^safety:/ { in_s=1; next }
+    in_s && /^[[:space:]]+[a-z_]+:/ {
+      k=$1; sub(/:/, "", k)
+      if (k == key) {
+        v=$2; sub(/#.*$/, "", v); gsub(/[[:space:]]+/, "", v)
+        print v; exit
+      }
+      next
+    }
+    in_s && $0 !~ /^[[:space:]]/ { in_s=0 }
   ' "$BB_CATALOG"
 }
 
@@ -213,11 +240,13 @@ active_rows() {
   local -A want=()
   local id
   while IFS= read -r id; do [[ -n "$id" ]] && want["$id"]=1; done < <(active_source_ids)
-  local line id root
+  local line id kind root
   while IFS= read -r line; do
     id="${line%%$'\t'*}"
+    kind="$(printf '%s' "$line" | cut -f2)"
     root="$(printf '%s' "$line" | cut -f4)"
-    [[ -n "${want[$id]:-}" && -n "$root" ]] && echo "$line"
+    # snapshot sources have no source root (they generate files) — always eligible
+    [[ -n "${want[$id]:-}" && ( -n "$root" || "$kind" == "snapshot" ) ]] && echo "$line"
   done < <(render_catalog "$plat")
 }
 

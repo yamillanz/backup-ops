@@ -31,6 +31,7 @@ presets:
     - videos
     - music
     - public
+    - library_root
     - dotfiles
     - configs
     - histories
@@ -45,6 +46,7 @@ presets:
     - videos
     - music
     - public
+    - library_root
     - downloads
     - games
     - appimages

@@ -44,12 +44,12 @@ plat="$(resolve_platform)"
 home="$(expand_home '~')"
 echo "platform=$plat restore-to=$TO from=$FROM"
 
-# --- selection (same as backup) ---------------------------------------------
+# --- selection (always normalized to ONE id per line before filtering) --------
 if [[ -n "$INCLUDE" ]]; then
-  IDS="$(printf '%s' "$INCLUDE" | tr ',' ' ')"
-  [[ -n "$PRESET" ]] && IDS="$IDS $(preset_ids "$PRESET" | tr '\n' ' ')"
+  IDS="$(printf '%s' "$INCLUDE" | tr ',' '\n')"
+  [[ -n "$PRESET" ]] && IDS="$IDS"$'\n'"$(preset_ids "$PRESET")"
 elif [[ -n "$PRESET" ]]; then
-  IDS="$(preset_ids "$PRESET" | tr '\n' ' ')"
+  IDS="$(preset_ids "$PRESET")"
 else
   IDS="$(active_source_ids)"
 fi
@@ -58,7 +58,7 @@ if [[ -n "$EXCLUDE_LIST" ]]; then
     IDS="$(printf '%s\n' "$IDS" | grep -vx "$id" || true)"
   done
 fi
-IDS="$(printf '%s\n' "$IDS" | sed '/^[[:space:]]*$/d' | sort -u | tr '\n' ' ')"
+IDS="$(printf '%s\n' "$IDS" | tr ' ' '\n' | sed '/^[[:space:]]*$/d' | sort -u | tr '\n' ' ')"
 [[ -n "$IDS" ]] || { echo "nothing selected"; exit 0; }
 echo "restore selection: ${IDS}"
 
@@ -96,25 +96,14 @@ restore_tar() {
   catalog_line="$(render_catalog "$plat" | grep -P "^$id\t" | head -1 || true)"
   src_root="$(printf '%s' "$catalog_line" | cut -f4)"
 
-  local -a inc=()
-  IFS='|' read -ra parts <<< "$extra"
-  local i
-  for ((i=0;i<${#parts[@]};i+=2)); do [[ "${parts[$i]}" == "include" ]] && inc+=("${parts[$((i+1))]}"); done
-
+  # The catalog root for the CURRENT platform already resolves every target
+  # (~ for dotfiles/histories/secrets, ~/.config for configs, %APPDATA% on
+  # Windows…). HOME_BASE is exported, so expand_home maps it under --to.
   local target
-  case "$id" in
-    configs) target="$(expand_home '~/.config')" ;;
-    local_share) target="$(expand_home '~/.local/share')" ;;
-    dotfiles|histories|secrets) target="$(expand_home '~')" ;;
-    *) target="$(expand_home "$src_root")" ;;
-  esac
+  target="$(expand_home "$src_root")"
   mkdir -p "$target" 2>/dev/null
 
-  if [[ ${#inc[@]} -gt 0 ]]; then
-    run "restore $id (selected) -> $target" tar -xzf "$tarball" --overwrite -C "$target" .
-  else
-    run "restore $id -> $target" tar -xzf "$tarball" --overwrite -C "$target" .
-  fi
+  run "restore $id -> $target" tar -xzf "$tarball" --overwrite -C "$target" .
 }
 
 # secrets carry extra permission care
@@ -132,7 +121,7 @@ restore_browsers() {
   browser_dest="$(render_catalog "$plat" | grep -P '^browsers\t' | head -1 | cut -f5)"
   [[ -d "$FROM/$browser_dest" ]] || { echo "  browsers: no mirror"; return 0; }
   local name root
-  browser_rows "$plat" | while read -r name root; do
+  browser_rows "$plat" | while IFS=$'\t' read -r name root _bex; do
     local mirror="$FROM/$browser_dest/$name"
     [[ -d "$mirror" ]] || { echo "  browser $name: no data in backup"; continue; }
     local target
