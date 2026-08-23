@@ -1,0 +1,14 @@
+# backup-ops repo hygiene
+node_modules/
+*.log
+data/last-run.json
+data/run-log.md
+data/state.yml
+
+# personal layer — never commit
+config/user.yml
+config/user.local.yml
+
+# never commit secrets/mirror data
+snapshots/.ssh
+snapshots/.gnupg

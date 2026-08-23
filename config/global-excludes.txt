@@ -1,0 +1,83 @@
+# backup-ops global excludes — applied to every mirror/tar/drain pass.
+# One glob per line. Lines prefixed with ~ are expanded from the user's home.
+# These regexes are fed to rsync --exclude and to tar --exclude.
+
+# --- caches (always) ---
+~/.cache/*
+~/.config/*/Cache
+~/.config/*/cache
+*Cache*
+*.part
+*.crdownload
+*browserutils*
+~/.local/share/Trash
+~/.local/share/recently-used.xbel
+
+# --- package/toolchain caches (re-installed, never restored) ---
+~/.npm/_cacache
+~/.npm/_logs
+~/.bun/install/cache
+~/.nvm/.cache
+~/.cargo/registry/cache
+~/.go/pkg
+~/.m2/repository
+~/.gradle/caches
+~/.cache/pip
+~/.cache/uv
+
+# --- dev junk across any project (grep-safe) ---
+node_modules/
+target/
+dist/
+build/
+.gradle/
+.terraform/
+.pytest_cache/
+__pycache__/
+.vscode/                        # only within projects (per-app handled in manifest)
+.idea/
+*.log
+*.tmp
+.venv/
+venv/
+coverage/
+
+# --- docker / containers (huge; re-pull) ---
+~/.docker/*
+~/.local/share/containers
+~/.config/containers
+*.sock
+
+# --- Steam / games (re-download; save files stay under ~/.steam handled separately) ---
+~/.steam/*
+~/.var/app/com.valvesoftware.Steam
+
+# --- app caches inside flatpak data (regenerated) ---
+*ShaderCache*
+*GPUCache*
+*GrShaderCache*
+*GPUPersistentCache*
+*GraphiteDawnCache*
+*Code\ Cache*
+history_directories
+last_session
+*.oldpgl
+flash
+component_crx_cache
+extensions_crx_cache
+optimization_guide_model_store
+OnDeviceHeadSuggestModel
+
+# --- IDE workspace storage (rebuildable) ---
+~/.config/Code/User/workspaceStorage
+~/.config/Code/logs
+~/.config/Windsurf/User/workspaceStorage
+~/.config/Cursor/User/workspaceStorage
+
+# --- misc huge/low-value ---
+~/.local/share/lutris
+~/.local/share/DBeaverData
+~/.rustup/toolchains/*/*/share/doc
+*.whl
+*.deb
+*.AppImage.tmp
