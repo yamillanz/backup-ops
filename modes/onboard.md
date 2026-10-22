@@ -30,9 +30,15 @@ preset/selection, output language) from a probe + Q&A, then hand off to `start`.
       customize precisely, let them toggle individual sources and write
       `selection: [...]` (setting `preset:` to empty).
    d. Non-interactive? → `auto_confirm: true|false`.
+   e. Migration target (optional but recommended): target distro/family and desktop,
+      or "unknown until I boot the new OS". Write the `migration:` block from
+      `config/user.example.yml`; leave `target.*` empty if unknown.
+      Ask about gaming libraries, VM disks, and system files only if the target is a
+      fresh migration; default them off/report-only.
 
 5. Summarize the resulting selection table (from `lib.sh render_catalog` intersected
-   with what probe says exists on this machine). Get explicit approval.
+   with what probe says exists on this machine), including `restore_policy` and
+   `restore_phase`. Get explicit approval.
 
 6. Offer a free rehearsal: `drill` mode.
 

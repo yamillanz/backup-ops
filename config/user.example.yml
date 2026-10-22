@@ -18,3 +18,22 @@ platform: auto       # auto | linux | windows | macos | wsl
 
 # Headless mode: the wizard asks once, summarizes, and runs without re-asking.
 auto_confirm: false
+
+# --- Migration profile (used by `start`, `backup`, `migrate`, `restore`) ------
+# The video's core rule: origin and destination decide what is safe to carry.
+# `auto` = detect from this machine. Set target.* when you already know the
+# destination (e.g. Fedora 44 + KDE Plasma), or leave blank and let restore
+# probe the new machine and write the comparison report.
+migration:
+  source:
+    platform: auto       # auto | linux | windows | macos | wsl
+    distro: auto         # auto = os-release ID (e.g. pop, arch, fedora)
+    family: auto         # auto = debian | arch | fedora | suse | other
+    desktop: auto        # auto = gnome | kde | cosmic | hyprland | ...
+  target:
+    platform: auto
+    distro: ""           # e.g. fedora
+    family: ""           # e.g. fedora
+    desktop: ""          # e.g. kde
+  restore_profile: safe  # safe (no DE) | same-de (only matching DE) | verbatim (danger)
+  include_vm_disks: false # copy qcow2 disks; definitions are always inventoried

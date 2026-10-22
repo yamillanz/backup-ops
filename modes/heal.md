@@ -28,7 +28,14 @@ classes (from AGENTS.md SELF-HEAL):
 | hardlink failed / 2device | cross-FS incremental | drop `--link-dest` for that run |
 | source missing | dir gone | log `skipped-missing`, continue (never fail run) |
 | browser "profile can't be loaded" | version mismatch | restore data files only; let app rebuild Local State/Prefs |
-| keyring/wallet won't restore | DE reseeds keyring | copy `~/.local/share/keyrings` verbatim; document re-seed on login |
+| Chromium passwords won't decrypt | keyring missing/mismatch | restore `~/.local/share/keyrings` before the profile, or use browser sync; never break the wallet |
+| package name not found on target | cross-family rename | do not guess; flag it in the package plan and ask for the target name |
+| desktop configs cause breakage | DE mismatch/version drift | revert to `safe`; restore `desktop_env` only on same DE/version with `same-de` |
+| `/etc`/NetworkManager skipped | sudo not available | leave `skipped-permission`; give the exact manual command; never fail the whole run |
+| VM disk copy fails | VM running / permission | power off; retry with `sudo -n rsync --sparse`; definitions are still safe |
+| Docker volume path absent | rootless/custom data-root | use `containers/backup-volumes.sh` helper-container export; do not assume `/var/lib/docker` |
+| AppImage not executable | mode lost on medium | `chmod +x` the copy; verify sha256 against `appimages.tsv` |
+| `CRITICAL GAPS` in coverage | browser/package/secret missing | fix the source or explicitly record a user-approved deviation; do not call it PASS |
 
 ### 2. Fix + retry
 Apply the first fix, re-run the same step from `backup.md`/`restore.md`, re-verify.

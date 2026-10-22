@@ -1,47 +1,96 @@
 # restore mode
 
-Goal: place a backed-up home back onto a (fresh) system — **any OS → any OS**
-(distro→distro, Windows/macOS→Linux, or any other pair). The catalog maps every
-source dest back through the CURRENT platform's roots, so a backup made on one OS
-restores onto another automatically (browsers included). Verify after. SELF-HEAL at
-full strength.
+Goal: place a backed-up home onto a (fresh) system across platforms/families, with
+**gated** restore. The backup's `migration.yml` is authoritative; the target is
+probed, and the migration report explains every decision.
 
 ## Preflight
 
-1. Load catalog `config/manifest.yml` + `config/user.yml` + `data/state.yml`.
-2. Locate `--from` (backup root). If unavailable/incomplete → `verify` first.
-3. Detect new OS (informational): `cat /etc/os-release`; `which pacman yay apt dnf
-   brew winget` (pacman/yay on Arch-likes, apt on Debian-likes, …). Used only for
-   the reinstall checklist note.
-4. Default `--to` = `$HOME`; `--dry-run` first unless disabled. Home-only writes.
+1. Load catalog + `config/user.yml` + `data/state.yml`.
+2. Locate `--from`; verify the backup first if it looks incomplete.
+3. Probe the new OS (`probe.sh`): distro, family, desktop, package manager, Flatpak,
+   browsers, keyring.
+4. Read `migration.yml`: source family/desktop, target intent, selection, profile.
+   No `migration.yml` → **legacy**: safe-only, warning, no DE/system apply. App
+   configs are staged under `restore-manual/configs` instead of blindly applied,
+   because an old `configs` tar may still contain desktop-environment state.
+5. Default `--to` = `$HOME`. Home-only writes, except staged manual artifacts.
 
-## Sequence (engine-driven)
+## Plan first
 
-Run `bash scripts/restore.sh --from <root> [--to <home>] [--dry-run] [--preset|--include|--exclude|--ask]`.
+```bash
+bash scripts/restore.sh --from <root> --to "$HOME" --plan-only
+```
 
-1. **dir** — reverse-rsync each `dirs/<id>/` → current platform root of that source
-   (e.g. Windows-created `dirs/documents` → `$HOME/Documents` on Linux).
-2. **browsers (drain)** — restore each browser's mirrored profile to its CURRENT
-   platform path (e.g. Windows `User Data` → Linux `~/.var/app/com.*/...` or native).
-   Version mismatch → SELF-HEAL neutral-profile rule (data files only).
-3. **tar** — configs → `~/.config`; dotfiles + histories → `$HOME`; secrets → `.ssh`
-   + `.gnupg` with **perms re-enforced** (dir 700, keys 600, pub 644).
-4. **snapshot** — informational: hand the checklist (reinstall apps, then config).
+Writes no target files. It writes `data/migration-report.md` and the package plan
+(under `data/restore-plan/`). Review:
+
+- family change (`debian → fedora`): package names differ; use the plan
+- desktop change (`gnome → kde`): `desktop_env` is staged, not applied
+- browser install format (native vs Flatpak): install the browser first
+- fonts/themes before app/DE configs
+- manual sources: `/etc`, NetworkManager, VMs, containers, AppImages, saves
+
+## Apply
+
+```bash
+bash scripts/restore.sh --from <root> --to "$HOME" [--profile safe|same-de|verbatim]
+```
+
+Default `safe`. Policies:
+
+| Policy | Behavior |
+|---|---|
+| `always` | apply in phase order |
+| `same-de` | apply only when source/target desktop match AND profile is `same-de` (or `verbatim`); otherwise stage |
+| `manual` | stage under `<to>/restore-manual/<id>`; never write `/etc` or system paths |
+| `never` | informational only |
+
+Phases: 10 packages plan → 20 fonts/themes → 30 dotfiles/secrets → 40 app configs/DE
+→ 50 browsers → 60 data → 90 system/manual.
+
+`verbatim` is intentionally dangerous: overwrite existing files and apply DE configs
+regardless of desktop. Never use it across distro families without a manual review.
+
+## Package continuity
+
+`restore.sh` reads `packages/native-apps.txt` (filtered) or `native-explicit.txt` and
+generates:
+
+- `packages-to-install.txt`
+- `install-packages.sh` (target package manager)
+- `flatpaks-to-install.txt` + `install-flatpaks.sh`
+
+It **never executes them**. Package names differ across families; review before
+running. This replaces guessing.
+
+## Browsers
+
+- Install the browser on the target first; restore only into an existing target root.
+- Restore is data-only: History/Cookies/Bookmarks/places.sqlite/extensions.
+- Chromium-variant passwords are encrypted with the system keyring. Restore
+  `~/.local/share/keyrings` before the browser, or use browser sync. Without it,
+  passwords will not decrypt.
+- Version mismatch: restore data files into a neutral profile; let the app regenerate
+  `Local State`/`Prefs`. See `heal`.
+
+## Desktop environments
+
+Do **not** copy DE configs across desktops. `desktop_env` is a separate tar with
+policy `same-de`; on a mismatch it lands in `restore-manual/desktop_env/` for review
+(dconf dump, KDE `.ini` files). Same DE still requires matching versions and the
+explicit `--profile same-de`. Install fonts/themes/extensions first, then import.
 
 ## Verification gate
 
-`bash scripts/verify.sh --tree <new-home> --restored`: dotfiles parse
-(`zsh -n`/`bash -n`), SSH perms 600, catalog roots present, browser sqlite integrity.
-Fail → `heal` → escalate. Do NOT mark done on browser failures without options.
+```bash
+bash scripts/verify.sh --tree "$HOME" --restored
+```
 
-## Cross-OS notes
-
-- Flatpak browser apps (Brave/Chrome/Edge/Opera/Vivaldi/Zen/LibreWolf) restore into
-  the same paths on any Linux; reinstall the matching flatpaks there first.
-- System state (`snapshot.txt`) = reinstall checklist — see `docs/migration-checklist.md`.
-- Desktop-environment settings (GNOME, KDE, COSMIC…) travel under `~/.config`:
-  config for a DE that isn't installed on the new OS is simply inert until it is.
+Checks dotfiles parse, SSH/keyring perms, browser sqlite, fonts when applied, DE gate,
+migration report, and package plan. Fail → `heal` → escalate.
 
 ## Record
 
-`data/run-log.md` + `data/state.yml` with the detected OS and any highlighted risks.
+`data/run-log.md`, `data/state.yml`, `<to>/restore-info.yml`,
+`<to>/migration-report.md`.

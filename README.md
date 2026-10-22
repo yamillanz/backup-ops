@@ -1,280 +1,199 @@
 # Backup-Ops
 
-Back up your whole home — files, documents, projects, app configs, dotfiles, shell
-history, SSH/GPG keys, and every browser's profile + browsing history — then restore
-it all onto a fresh operating system. Driven by an AI agent (Claude Code, Codex,
-OpenCode, Cursor, etc.), **fully configurable**, and cross-platform (Linux, Windows,
-macOS, WSL).
+Back up a home directory, verify it, and restore it onto a fresh OS — **including
+cross-distro-family migrations** (Debian/Ubuntu → Arch/Fedora/etc.). Driven by an AI
+agent or run directly. The catalog is data; your selection and migration profile live
+in `config/user.yml`.
 
-This guide walks through the two real journeys people use it for:
+The core rule: **origin and destination matter**. Copying a whole home across distros
+carries caches, obsolete configs, and desktop-environment state that can break the new
+system. Backup-Ops separates data, app configs, desktop state, secrets, package
+inventories, and manual system artifacts so restore can be gated instead of blind.
 
-1. **The backup** — on your current OS (any Linux distro, Windows, macOS, WSL).
-2. **The restore** — on your new OS (any other one; the catalog remaps paths).
+## What it covers
 
-Both follow the same rhythm: *probe the machine → answer a few questions (typical
-picks already pre-selected) → confirm → run → verify*. If anything breaks mid-way,
-the agent diagnoses the problem and asks you before doing anything destructive.
+| Layer | Examples | Restore behavior |
+|---|---|---|
+| User data | Documents, Projects, Pictures, Videos, Music, Calibre | apply |
+| Dotfiles/history | `.zshrc`, `.bashrc`, tmux, git, shell history | apply, parse-checked |
+| App configs | `~/.config/<app>` (cache-free) | apply |
+| Desktop state | dconf, KDE/Plasma, COSMIC, Hyprland | **same-DE only**, otherwise staged |
+| Secrets | `~/.ssh`, `~/.gnupg`, keyrings | apply, permissions enforced |
+| Fonts/themes | user fonts, themes, icons, cursors | apply before configs |
+| Browsers | Firefox, Chromium, Brave, Chrome, Edge, Opera, Vivaldi, Zen, LibreWolf | data profile only; keyring caveat |
+| Packages | native explicit/full, AUR, Flatpak, Snap | inventory + generated target plan, never auto-installed |
+| Gaming | Steam, Lutris, Heroic, Ludusavi saves | opt-in, large |
+| AppImages | scan/copy `*.AppImage` | manual restore |
+| System files | fstab, hosts, sshd, udev, sysctl, cron, units | **manual only** |
+| Network | NetworkManager profiles, VPN/WiFi | **manual only**, 600 |
+| VMs/containers | libvirt XML, VirtualBox, compose, volumes | definitions/inventory; disks opt-in |
 
----
+## Safety rules
 
-## Two ways to run it
+- Backup copies; restore writes under `--to`; system paths are never auto-written.
+- Desktop-environment state is not restored across different desktops.
+- Package install scripts are generated, not executed.
+- Cleanup is report-first; destructive actions require a named flag and `--yes`.
+- A backup run with critical coverage gaps exits non-zero.
+- No cache/trash payload is packed.
 
-- **Path A (recommended):** run it *inside your AI agent tool* — the agent asks the
-  questions and self-heals problems.
-- **Path B (no agent):** run the same scripts directly from a terminal.
-
-Every step below shows Path A; the "Path B" sections show the exact script the agent
-drives for you.
-
----
-
-# PART 1 — The backup (on your current OS)
-
-### Step 0 — Install the two prerequisites
-
-Backup-Ops needs `rsync` and `sqlite3` (sqlite keeps browser history safe during the
-copy):
-
-```bash
-# Debian / Ubuntu / Pop!_OS
-sudo apt install -y rsync sqlite3
-
-# Arch and derivatives (Omarchy, CachyOS, …)
-sudo pacman -S --needed rsync sqlite3
-
-# Fedora
-sudo dnf install -y rsync sqlite
-
-# macOS (rsync is usually preinstalled)
-brew install sqlite3
-
-# Windows — run inside Git-Bash or WSL; install rsync + sqlite3 there
-# (e.g. `pacman -S rsync sqlite` in MSYS2/Git-Bash, or use WSL)
-```
-
-### Step 1 — Download the project
+## Quick start — backup
 
 ```bash
-git clone https://github.com/<you>/backup-ops.git
-cd backup-ops
-```
+cp config/user.example.yml config/user.yml
+# edit destination + preset or selection; add migration target if known
 
-> No repo yet? Just copy the folder (e.g. `cp -r ~/Projects/backup-ops ./backup-ops`).
-
-### Step 2 — Open your favorite agent tool
-
-Pick any — they all read the same skill in this folder:
-
-| Tool | How to open it |
-|------|----------------|
-| **OpenCode** | `opencode` in the `backup-ops/` folder |
-| **Claude Code** | `claude` in the `backup-ops/` folder |
-| **Codex** | `codex` in the `backup-ops/` folder |
-| **Cursor** | open `backup-ops/` as a workspace |
-| **Grok Build CLI** | `grok` in the `backup-ops/` folder |
-| **Qwen / Copilot / Kimi** | same — open the folder and start chatting |
-
-### Step 3 — Start the process
-
-Run the slash command, **or** just say it in plain words — both route to the same
-pipeline:
-
-```
-/backup-ops start
-```
-
-or say:
-
-> "Start the backup process"
-
-or in Codex (no slash commands):
-
-```text
-Run the backup-ops start mode for a backup.
-```
-
-**What happens next:** the agent runs the probe (`scripts/probe.sh`) and detects your
-platform, home folder, present folders, installed browsers, and connected drives. Then
-it starts asking you questions.
-
-### Step 4 — Answer the questions
-
-A short set of questions. **The typical answers are already pre-selected** — you mostly
-just confirm:
-
-1. **Where should the backup live?** — it lists the external drives it found; pick the
-   mount path (e.g. `/media/<you>/BACKUP/home-backup` on Linux, `D:/home-backup` on
-   Windows, `/Volumes/BACKUP/home-backup` on macOS). Plug in the USB/NVMe drive first.
-2. **What should be backed up?** — folders, configs, dotfiles, secrets, browsers,
-   system state are pre-selected. Tweak if you want ("skip Downloads", "add Games",
-   or "keep all").
-3. **Output language** — so the agent talks to you in your language (default English).
-
-Your answers are saved to `config/user.yml` (your personal file, never committed).
-
-### Step 5 — Confirm and run
-
-The agent shows a plan table and runs a **dry-run** preview first:
-
-```bash
+bash scripts/probe.sh
+bash scripts/clean.sh                 # report only
 bash scripts/backup.sh --dry-run
-```
-
-Then, once you confirm, it runs for real:
-
-```bash
 bash scripts/backup.sh
+bash scripts/verify.sh --tree <destination>
 ```
 
-### Step 6 — Verify
+`backup.sh` writes:
 
-Verification is not optional. The agent runs:
+- `migration.yml` — source/target profile, selection, catalog hash
+- `coverage-report.md` — detected vs packed; `CRITICAL GAPS` means failure
+- `packages/` — native explicit/full, AUR, Flatpak, Snap, install hints
+- `system-state/`, `system-files/`, `network/`, `virtualization/`, `containers/`
+- `portable/appimages/`, `gaming/`, `fonts/`, `themes/`
+- `manifest.sha256` — every file
+
+The engine refuses same-disk-as-`/` destinations unless `--force`, checks estimated
+payload + 10% free space, and logs alternates for native/flatpak candidate roots. A
+backup stops when free space is below `free_space_min_gb` (30 by default); `--force`
+is the explicit override.
+
+## Clean before packing
 
 ```bash
-bash scripts/verify.sh --tree /media/<you>/BACKUP/home-backup
+bash scripts/clean.sh
 ```
 
-and reports each section: folders, browser sqlite integrity, tar checksums, secrets.
-All green = your backup is honest. **Keep the drive unplugged** until you're on the
-new OS.
-
----
-
-### Path B — the same backup with no agent
+Reports home caches/trash, package-manager caches, orphan-package preview, and unused
+Flatpak runtimes. Nothing is deleted by default. Explicit actions:
 
 ```bash
-cp config/user.example.yml config/user.yml     # one-time setup
-# edit config/user.yml: set destination + preset (or leave selection empty)
-bash scripts/probe.sh                            # see what it detected
-bash scripts/backup.sh --dry-run                 # preview
-bash scripts/backup.sh                           # go
-bash scripts/verify.sh --tree <destination>      # prove it
+bash scripts/clean.sh --cache --yes
+bash scripts/clean.sh --orphans --yes
+bash scripts/clean.sh --flatpak --yes
+bash scripts/clean.sh --trash --yes
 ```
 
----
+Never run `rm -rf` on a home directory; never clean browser profiles, keyrings, or
+projects.
 
-# PART 2 — The restore (on the new OS)
+## Cross-distro migration
 
-This is where you move onto the fresh system. The catalog already knows every
-platform's paths, so a backup made on one OS (Linux, Windows, macOS, WSL) restores
-correctly onto any other — browsers included.
-
-### Step 1 — Install the new OS
-
-Install whatever you're moving to — a Linux distro (Omarchy, Ubuntu, Fedora…),
-Windows, or macOS. Do **not** copy your files yet. The backup tool restores your
-*home directory and user config* — the OS itself you install fresh.
-
-### Step 2 — Reinstall your apps first
-
-Your app *data* will be restored, but app *binaries* are not (that's the OS's job).
-The backup captured a checklist — `system-state/snapshot.txt` — including your
-package/flatpak list. Example on Linux (flatpak IDs are portable across distros):
-
-```bash
-flatpak install flathub com.brave.Browser com.google.Chrome app.zen_browser.zen
-# ... and the rest from snapshot.txt
-```
-
-On Windows you'd reinstall via `winget`, on macOS via `brew` — same idea: apps
-first, then restore their data on top. (Full checklist: `docs/migration-checklist.md`.)
-
-### Step 3 — Download the project on the new OS
-
-Same as before — the new machine needs the same `backup-ops/` folder:
-
-```bash
-git clone https://github.com/<you>/backup-ops.git
-cd backup-ops
-# install rsync + sqlite3 — same command as in Part 1, for YOUR new OS
-```
-
-### Step 4 — Open your agent tool
-
-Same as Step 2 in Part 1 — `opencode`, `claude`, `codex`, etc., in the `backup-ops/`
-folder.
-
-### Step 5 — Start the restore process
-
-```
-/backup-ops start restore
-```
-
-or say:
-
-> "Start the restore process — I want to put everything back."
-
-or in Codex:
-
-```text
-Run the backup-ops start mode for a restore onto this new OS.
-```
-
-### Step 6 — Answer the questions
-
-Same rhythm, reversed:
-
-1. **Where is the backup?** — the external drive path (`--from`).
-2. **Where should it go?** — your new home (defaults to `$HOME`).
-3. **What should be restored?** — everything that was in the backup, pre-selected.
-
-### Step 7 — Confirm, run, verify
-
-The agent dry-runs, confirms, restores, and verifies:
-
-```bash
-bash scripts/restore.sh --from /media/<you>/BACKUP/home-backup --dry-run
-bash scripts/restore.sh --from /media/<you>/BACKUP/home-backup
-bash scripts/verify.sh --tree ~ --restored
-```
-
-The restore-side verify checks your dotfiles still parse, your SSH keys have the right
-permissions, and your browser history came back intact.
-
-### Step 8 — Live on it for a week, then wipe the drive
-
-Keep the backup drive until you're comfortable. Then (and only then) reformat it.
-
----
-
-### Path B — the same restore with no agent
-
-```bash
-bash scripts/restore.sh --from <backup-root> --to ~ --dry-run
-bash scripts/restore.sh --from <backup-root> --to ~
-bash scripts/verify.sh --tree ~ --restored
-```
-
----
-
-## The two files you'll actually touch
-
-Everything else is engine + agent playbooks. These two are yours:
+Add the destination intent to `config/user.yml` (or leave target blank and let restore
+probe the new machine):
 
 ```yaml
-# config/user.yml   (personal, gitignored)
-language:
-  output: en            # human output language
-preset: essentials      # essentials | full | minimal
-selection: []           # precise list overrides preset: ["documents","projects","secrets"]
-destination: "/media/<you>/BACKUP/home-backup"
+migration:
+  source:
+    platform: auto
+    distro: auto
+    family: auto
+    desktop: auto
+  target:
+    platform: auto
+    distro: fedora
+    family: fedora
+    desktop: kde
+  restore_profile: safe      # safe | same-de | verbatim
+  include_vm_disks: false
+```
+
+On the destination:
+
+```bash
+bash scripts/restore.sh --from <backup-root> --to "$HOME" --plan-only
+# read data/migration-report.md, install the apps, then:
+bash scripts/restore.sh --from <backup-root> --to "$HOME"
+bash scripts/verify.sh --tree "$HOME" --restored
+```
+
+`--plan-only` writes no target files. It produces `migration-report.md` and the package
+plan. The default `safe` profile stages `desktop_env` instead of applying it. Use
+`--profile same-de` only when the desktop and version actually match; `verbatim` is
+intentionally dangerous. A backup without `migration.yml` is treated as legacy:
+safe-only, with app configs staged under `restore-manual/configs`.
+
+### Package continuity
+
+Restore reads `packages/native-apps.txt` (filtered) or `native-explicit.txt` and
+generates `packages-to-install.txt`, `install-packages.sh`, and Flatpak equivalents.
+It does **not** run them. Package names differ across families; review first.
+
+### Browsers and the keyring
+
+Install the browser on the target first. Restore uses an existing browser root only.
+Profiles restore data files; Chromium-variant passwords need the original keyring
+(`~/.local/share/keyrings`) or browser sync. Without it, tabs/bookmarks return but
+saved passwords will not decrypt.
+
+### Desktop environments
+
+Do not copy DE configs across desktops. `desktop_env` is a separate tar with policy
+`same-de`; on a mismatch it is staged under `<to>/restore-manual/desktop_env/` for
+review. Same DE still requires matching versions and the explicit `same-de` profile.
+Install fonts/themes/extensions first, then import. GNOME: `dconf dump/load`; KDE:
+the relevant `.ini` files or `konsave`.
+
+### Outside the home
+
+`system_files` copies selected `/etc` files (fstab, hosts, sshd, udev, sysctl, cron,
+units) for review. `network` copies NetworkManager profiles at 600. `virtualization`
+exports XML/inventory; disks only with `include_vm_disks: true` and VMs powered off.
+`containers` copies compose files and generates a volume-backup script. None of this
+is auto-restored.
+
+## Verify
+
+```bash
+bash scripts/verify.sh --tree <backup-root>
+bash scripts/verify.sh --tree "$HOME" --restored
+```
+
+The backup's own selection is authoritative. Checks include manifests/checksums,
+tars, sqlite integrity, package inventory, AppImage exec+sha256, network/SSH
+permissions, VM XML, compose YAML, no cache/trash, migration metadata, coverage gaps,
+dotfile parsing, keyring/SSH permissions, fonts, and the desktop gate.
+
+## Configuration
+
+Two files matter:
+
+```yaml
+# config/user.yml — personal, gitignored
+language: {output: en}
+preset: essentials        # essentials | full | minimal
+selection: []             # explicit ids override preset
+destination: ""
 auto_confirm: false
+migration: { ... }        # source/target profile
 ```
 
-```yaml
-# config/manifest.yml  (committed catalog — the configurable part)
-# add/edit sources, per-platform roots, presets, browsers, exclude rules here
-```
+`config/manifest.yml` is the committed catalog: sources, per-platform roots,
+include/exclude rules, presets, restore policies, and safety knobs. Add a source there
+to extend coverage; never write personal paths into it.
 
-Want to back up something new (a game folder, a different browser)? Add a `source`
-block to the catalog. Want to reorder or rename a preset? Edit `presets:`. That's the
-whole philosophy — **configurable first, always**.
+## Requirements
 
-## Requirements, security, development
+Required: `bash`, `rsync`, `tar`, `sqlite3`.
+Optional collectors/checks: `flatpak`, `snap`, `ludusavi`, `virsh`, `VBoxManage`,
+`docker`/`podman`, `python3` (XML/YAML validation), `gio`/`trash-cli` (trash cleanup).
 
-See [README's sibling docs](docs/) for the migration checklist, and
-[CONTRIBUTING.md](CONTRIBUTING.md) for development. Quick facts: MIT licensed, no
-runtime beyond bash + rsync + tar + sqlite3, secrets backed up to a `0600` tar and
-restored with strict permissions, never logged, never destructive.
+## Security
 
-*Data gets configured, never hardcoded.*
+Backups are unencrypted by default; protect the drive. Secrets tar and NetworkManager
+dumps are permission-tight, but the medium itself is the boundary. Do not upload the
+backup root to a shared location. SSH host keys and WiFi/VPN profiles are sensitive.
+
+## Development
+
+See `CONTRIBUTING.md` and `AGENTS.md`. The catalog is data; the engine reads it. Run
+`bash -n scripts/*.sh` and a fixture backup→verify→restore→verify before claiming a
+change works.
+
+MIT licensed.

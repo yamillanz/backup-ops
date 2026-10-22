@@ -7,11 +7,13 @@
 ~/.config/*/Cache
 ~/.config/*/cache
 *Cache*
+cache2/
+startupCache/
+shader-cache/
 *.part
 *.crdownload
 *browserutils*
 ~/.local/share/Trash
-~/.local/share/recently-used.xbel
 
 # --- package/toolchain caches (re-installed, never restored) ---
 ~/.npm/_cacache
@@ -48,9 +50,9 @@ coverage/
 ~/.config/containers
 *.sock
 
-# --- Steam / games (re-download; save files stay under ~/.steam handled separately) ---
-~/.steam/*
-~/.var/app/com.valvesoftware.Steam
+# Gaming directories are NOT excluded globally: gaming_steam,
+# gaming_libraries, gaming_lutris_data, etc. are explicit opt-in catalog
+# sources. The default presets keep them off so a normal home backup stays small.
 
 # --- app caches inside flatpak data (regenerated) ---
 *ShaderCache*
@@ -75,7 +77,6 @@ OnDeviceHeadSuggestModel
 ~/.config/Cursor/User/workspaceStorage
 
 # --- misc huge/low-value ---
-~/.local/share/lutris
 ~/.local/share/DBeaverData
 ~/.rustup/toolchains/*/*/share/doc
 *.whl

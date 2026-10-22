@@ -69,12 +69,14 @@ expand_home() {
 # with any trailing `# comment` and surrounding quotes stripped.
 yaml_get() {
   local f="$1" key="$2" v
+  [[ -f "$f" ]] || return 0
   v="$(sed -n "s/^[[:space:]]*$key:[[:space:]]*//p" "$f" | head -1)"
   printf '%s' "$v" | strip_comment | strip_quotes
 }
 
 yaml_get_dotted() {
   local f="$1" dotted="$2"
+  [[ -f "$f" ]] || return 0
   local pat="${dotted//./[[:space:]]*}"
   awk -v pat="^$dotted:" '$0 ~ pat { sub(/^[^:]*:[[:space:]]*/,""); print; exit }' "$f"
 }
@@ -265,4 +267,264 @@ dest_root() {
   r="$(user_yml destination)"
   [[ -z "$r" ]] && r="$(yaml_get "$BB_CATALOG" default_destination)"
   expand_home "$r"
+}
+
+# ---------------------------------------------------------------------------
+# Migration helpers. The source/target profile is USER data: it lives in
+# config/user.yml under `migration:` and is copied into every backup root as
+# migration.yml (flat keys, easy to read from a restore host with no YAML lib).
+# ---------------------------------------------------------------------------
+command_present() { command -v "$1" >/dev/null 2>&1; }
+
+os_release_field() {
+  local key="$1"
+  [[ -r /etc/os-release ]] || return 0
+  sed -n "s/^${key}=//p" /etc/os-release | head -1 | tr -d '"'
+}
+
+distro_id() { os_release_field ID; }
+distro_like() { os_release_field ID_LIKE; }
+
+distro_family() {
+  local id like
+  id="$(distro_id | tr '[:upper:]' '[:lower:]')"
+  like="$(distro_like | tr '[:upper:]' '[:lower:]')"
+  case " $id $like " in
+    *debian*|*ubuntu*|*pop*|*mint*|*elementary*|*kali*|*raspbian*) echo debian ;;
+    *arch*|*manjaro*|*endeavouros*|*garuda*|*cachyos*) echo arch ;;
+    *fedora*|*rhel*|*centos*|*rocky*|*almalinux*|*" ol "*) echo fedora ;;
+    *suse*|*opensuse*|*sles*) echo suse ;;
+    *) echo other ;;
+  esac
+}
+
+pkg_manager() {
+  local c
+  for c in pacman apt dnf zypper apk; do
+    command_present "$c" && { echo "$c"; return 0; }
+  done
+  echo ""
+}
+
+pkg_install_cmd() {
+  case "$(pkg_manager)" in
+    pacman) echo "sudo pacman -S --needed" ;;
+    apt)    echo "sudo apt install -y" ;;
+    dnf)    echo "sudo dnf install -y" ;;
+    zypper) echo "sudo zypper install -y" ;;
+    apk)    echo "sudo apk add" ;;
+    *)      echo "" ;;
+  esac
+}
+
+normalize_desktop() {
+  local d
+  d="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  case "$d" in
+    *gnome*|*unity*) echo gnome ;;
+    *kde*|*plasma*) echo kde ;;
+    *cosmic*) echo cosmic ;;
+    *hyprland*) echo hyprland ;;
+    *sway*) echo sway ;;
+    *xfce*) echo xfce ;;
+    *cinnamon*) echo cinnamon ;;
+    *mate*) echo mate ;;
+    *lxqt*) echo lxqt ;;
+    *budgie*) echo budgie ;;
+    "") echo unknown ;;
+    *) echo "$d" ;;
+  esac
+}
+
+desktop_name() {
+  normalize_desktop "${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}"
+}
+
+desktop_version() {
+  case "$(desktop_name)" in
+    gnome) command_present gnome-shell && gnome-shell --version 2>/dev/null | awk '{print $3}' ;;
+    kde)   command_present plasmashell && plasmashell --version 2>/dev/null | awk '{print $2}' ;;
+    *)     echo "" ;;
+  esac
+}
+
+# first_existing_root / first_declared_root: catalog roots may be a candidate
+# list separated by `>` (native > flatpak, user fonts > legacy fonts). Backup
+# and restore use the first existing candidate; restore never invents one.
+root_candidates() {
+  local expr="$1" p
+  local -a cand=()
+  IFS='>' read -ra cand <<< "$expr"
+  for p in "${cand[@]}"; do
+    p="$(printf '%s' "$p" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -n "$p" ]] && printf '%s\n' "$(expand_home "$p")"
+  done
+}
+
+first_existing_root() {
+  local p
+  while IFS= read -r p; do
+    [[ -n "$p" && -e "$p" ]] && { printf '%s' "$p"; return 0; }
+  done < <(root_candidates "$1")
+  return 1
+}
+
+first_declared_root() {
+  local p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && { printf '%s' "$p"; return 0; }
+  done < <(root_candidates "$1")
+  return 1
+}
+
+resolve_target_root() {
+  first_existing_root "$1" || first_declared_root "$1"
+}
+
+path_under() {
+  local p="$1" base="$2"
+  [[ -n "$base" ]] || return 1
+  case "$p" in "$base"|"$base"/*) return 0 ;; esac
+  return 1
+}
+
+# yaml_path_get <file> <dotted.path>: minimal indentation-aware scalar reader.
+# Handles the small user.yml shape; not a general YAML parser.
+yaml_path_get() {
+  local file="$1" want="$2"
+  [[ -f "$file" ]] || return 0
+  awk -v want="$want" '
+    function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+    function clean(s) { sub(/[[:space:]]*#.*$/, "", s); gsub(/["\047]/, "", s); return trim(s) }
+    {
+      raw=$0
+      sub(/[[:space:]]*#.*$/, "", raw)
+      if (raw ~ /^[[:space:]]*$/) next
+      match(raw, /^[[:space:]]*/); ind=RLENGTH
+      line=substr(raw, ind+1)
+      if (line !~ /^[A-Za-z0-9_.-]+:/) next
+      key=line; sub(/:.*/, "", key)
+      val=line; sub(/^[^:]*:[[:space:]]*/, "", val)
+      while (depth>0 && inds[depth] >= ind) depth--
+      if (val == "") {
+        depth++; keys[depth]=key; inds[depth]=ind
+      } else {
+        path=""
+        for (i=1;i<=depth;i++) path=path (path=="" ? "" : ".") keys[i]
+        path=path (path=="" ? "" : ".") key
+        if (path==want) { print clean(val); exit }
+      }
+    }
+  ' "$file"
+}
+
+# migration_get <dotted.key> [default]: flat migration_* override first, then
+# the nested `migration:` block in config/user.yml.
+migration_get() {
+  local dotted="$1" def="${2:-}" flat v
+  flat="migration_${dotted//./_}"
+  v="$(user_yml "$flat")"
+  if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+  v="$(yaml_path_get "$BB_USER" "migration.$dotted")"
+  if [[ -n "$v" ]]; then printf '%s' "$v"; else printf '%s' "$def"; fi
+}
+
+migration_bool() {
+  case "$(migration_get "$1" "${2:-false}" | tr '[:upper:]' '[:lower:]')" in
+    true|yes|1|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+migration_profile() {
+  local p
+  p="$(migration_get restore_profile safe)"
+  [[ -n "$p" ]] || p="safe"
+  printf '%s' "$p"
+}
+
+# Catalog metadata (4-space fields inside a source block).
+source_field() {
+  local id="$1" key="$2"
+  awk -v want="$id" -v key="$key" '
+    function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+    function clean(s) { sub(/[[:space:]]*#.*$/, "", s); gsub(/["\047]/, "", s); return trim(s) }
+    /^[[:space:]]*-[[:space:]]*id:/ {
+      v=$0; sub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "", v); v=trim(v); gsub(/["\047]/, "", v)
+      cur=(v==want); next
+    }
+    cur && /^    [a-z_]+:/ {
+      line=$0; sub(/^    /, "", line); k=line; sub(/:.*/, "", k)
+      if (k==key) { v=line; sub(/^[^:]*:[[:space:]]*/, "", v); print clean(v); exit }
+    }
+  ' "$BB_CATALOG"
+}
+
+source_policy() {
+  local v
+  v="$(source_field "$1" restore_policy)"
+  [[ -n "$v" ]] && printf '%s' "$v" || printf 'always'
+}
+
+source_phase() {
+  local v
+  v="$(source_field "$1" restore_phase)"
+  [[ -n "$v" ]] && printf '%s' "$v" || printf '60'
+}
+
+catalog_field() {
+  local id="$1" field="$2" plat="${3:-$(detect_platform)}"
+  case "$field" in
+    kind) render_catalog "$plat" | awk -F'\t' -v id="$id" '$1==id{print $2; exit}' ;;
+    root) render_catalog "$plat" | awk -F'\t' -v id="$id" '$1==id{print $4; exit}' ;;
+    dest) render_catalog "$plat" | awk -F'\t' -v id="$id" '$1==id{print $5; exit}' ;;
+    label) render_catalog "$plat" | awk -F'\t' -v id="$id" '$1==id{print $6; exit}' ;;
+    extra) render_catalog "$plat" | awk -F'\t' -v id="$id" '$1==id{print $7; exit}' ;;
+  esac
+}
+
+# policy_allows <policy> <profile> <source_desktop> <target_desktop>
+policy_allows() {
+  local policy="$1" profile="$2" src_de="$3" tgt_de="$4"
+  case "$policy" in
+    always) return 0 ;;
+    same-de)
+      [[ "$profile" == "verbatim" ]] && return 0
+      [[ "$profile" == "same-de" && -n "$src_de" && -n "$tgt_de" && "$src_de" != "unknown" && "$tgt_de" != "unknown" && "$src_de" == "$tgt_de" ]]
+      ;;
+    manual) return 0 ;;   # caller stages it, never applies it
+    never) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+write_migration_manifest() {
+  local dest="$1" selection="$2" plat="${3:-$(detect_platform)}"
+  local sp sd sf sde tp td tf tde
+  sp="$(migration_get source.platform auto)"; [[ "$sp" == "auto" || -z "$sp" ]] && sp="$plat"
+  sd="$(migration_get source.distro auto)";   [[ "$sd" == "auto" || -z "$sd" ]] && sd="$(distro_id)"
+  sf="$(migration_get source.family auto)";   [[ "$sf" == "auto" || -z "$sf" ]] && sf="$(distro_family)"
+  sde="$(migration_get source.desktop auto)"; [[ "$sde" == "auto" || -z "$sde" ]] && sde="$(desktop_name)"
+  tp="$(migration_get target.platform auto)"; [[ "$tp" == "auto" || -z "$tp" ]] && tp="$plat"
+  td="$(migration_get target.distro unknown)"; [[ -z "$td" ]] && td="unknown"
+  tf="$(migration_get target.family unknown)"; [[ -z "$tf" ]] && tf="unknown"
+  tde="$(migration_get target.desktop unknown)"; [[ -z "$tde" ]] && tde="unknown"
+  mkdir -p "$dest" 2>/dev/null || true
+  {
+    echo "# backup-ops migration manifest — generated $(date -Iseconds)"
+    echo "schema: 1"
+    echo "created: \"$(date -Iseconds)\""
+    echo "source_platform: \"$sp\""
+    echo "source_distro: \"$sd\""
+    echo "source_family: \"$sf\""
+    echo "source_desktop: \"$sde\""
+    echo "source_desktop_version: \"$(desktop_version)\""
+    echo "target_platform: \"$tp\""
+    echo "target_distro: \"$td\""
+    echo "target_family: \"$tf\""
+    echo "target_desktop: \"$tde\""
+    echo "restore_profile: \"$(migration_profile)\""
+    echo "selection: \"$selection\""
+    echo "catalog_sha256: \"$(sha256sum "$BB_CATALOG" 2>/dev/null | awk '{print $1}')\""
+  } > "$dest/migration.yml"
 }
